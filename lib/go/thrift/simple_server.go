@@ -20,6 +20,7 @@
 package thrift
 
 import (
+	"context"
 	"log"
 	"runtime/debug"
 	"sync"
@@ -32,9 +33,12 @@ import (
  * This will work if golang user implements a conn-pool like thing in client side.
  */
 type TSimpleServer struct {
-	closed int32
-	wg     sync.WaitGroup
-	mu     sync.Mutex
+	closed     int32
+	wg         sync.WaitGroup
+	ctx        context.Context
+	cancelFunc context.CancelFunc
+	mu         sync.Mutex
+	clientChan chan TTransport
 
 	processorFactory       TProcessorFactory
 	serverTransport        TServerTransport
@@ -87,7 +91,12 @@ func NewTSimpleServerFactory4(processorFactory TProcessorFactory, serverTranspor
 }
 
 func NewTSimpleServerFactory6(processorFactory TProcessorFactory, serverTransport TServerTransport, inputTransportFactory TTransportFactory, outputTransportFactory TTransportFactory, inputProtocolFactory TProtocolFactory, outputProtocolFactory TProtocolFactory) *TSimpleServer {
-	return &TSimpleServer{
+
+	ctx, cncl := context.WithCancel(context.Background())
+	toReturn := &TSimpleServer{
+		clientChan:             make(chan TTransport, 1024),
+		ctx:                    ctx,
+		cancelFunc:             cncl,
 		processorFactory:       processorFactory,
 		serverTransport:        serverTransport,
 		inputTransportFactory:  inputTransportFactory,
@@ -95,6 +104,23 @@ func NewTSimpleServerFactory6(processorFactory TProcessorFactory, serverTranspor
 		inputProtocolFactory:   inputProtocolFactory,
 		outputProtocolFactory:  outputProtocolFactory,
 	}
+	for i := 0; i < 1024; i++ {
+		toReturn.wg.Add(1)
+		go func() {
+			for {
+				select {
+				case <-toReturn.ctx.Done():
+					toReturn.wg.Done()
+					return
+				case client := <-toReturn.clientChan:
+					if err := toReturn.processrequests(client); err != nil {
+						log.println("error processing request:", err)
+					}
+				}
+			}
+		}()
+	}
+	return toReturn
 }
 
 func (p *TSimpleServer) ProcessorFactory() TProcessorFactory {
@@ -137,13 +163,7 @@ func (p *TSimpleServer) innerAccept() (int32, error) {
 		return 0, err
 	}
 	if client != nil {
-		p.wg.Add(1)
-		go func() {
-			defer p.wg.Done()
-			if err := p.processRequests(client); err != nil {
-				log.Println("error processing request:", err)
-			}
-		}()
+		p.clientChan <- client
 	}
 	return 0, nil
 }
@@ -177,6 +197,7 @@ func (p *TSimpleServer) Stop() error {
 	}
 	atomic.StoreInt32(&p.closed, 1)
 	p.serverTransport.Interrupt()
+	p.cancelFunc()
 	p.wg.Wait()
 	return nil
 }
