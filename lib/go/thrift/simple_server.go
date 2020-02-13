@@ -113,8 +113,8 @@ func NewTSimpleServerFactory6(processorFactory TProcessorFactory, serverTranspor
 					toReturn.wg.Done()
 					return
 				case client := <-toReturn.clientChan:
-					if err := toReturn.processrequests(client); err != nil {
-						log.println("error processing request:", err)
+					if err := toReturn.processRequests(client); err != nil {
+						log.Println("error processing request:", err)
 					}
 				}
 			}
