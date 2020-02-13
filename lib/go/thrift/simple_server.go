@@ -104,7 +104,7 @@ func NewTSimpleServerFactory6(processorFactory TProcessorFactory, serverTranspor
 		inputProtocolFactory:   inputProtocolFactory,
 		outputProtocolFactory:  outputProtocolFactory,
 	}
-	for i := 0; i < 1024; i++ {
+	for i := 0; i < 128; i++ {
 		toReturn.wg.Add(1)
 		go func() {
 			for {
